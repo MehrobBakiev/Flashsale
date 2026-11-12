@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: flashsale
+          POSTGRES_PASSWORD: flashsale
+          POSTGRES_DB: flashsale_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U flashsale"
+          --health-interval 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Unit tests
+        run: go test -race -count=1 ./...
+      - name: Integration tests (PostgreSQL)
+        env:
+          TEST_POSTGRES_DSN: postgres://flashsale:flashsale@localhost:5432/flashsale_test?sslmode=disable
+        run: go test -race -count=1 -tags integration ./internal/storage/postgres/
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t flashsale:ci .
